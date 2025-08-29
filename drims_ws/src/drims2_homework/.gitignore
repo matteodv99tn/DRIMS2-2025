@@ -1,0 +1,10 @@
+*~
+*.kdev4
+kdev4/
+*.txt.user*
+*.orig*
+*.autosave*
+*.idea
+*.pyc
+__pycache__
+.vscode
