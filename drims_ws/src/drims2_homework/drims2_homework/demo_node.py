@@ -1,12 +1,14 @@
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, TransformStamped
 from drims2_motion_server.motion_client import MotionClient
 from drims2_msgs.srv import DiceIdentification
 from moveit_msgs.msg import MoveItErrorCodes
 from typing import Tuple
+from tf2_ros import StaticTransformBroadcaster
 
-GRIPPER_ACTION_NAME = '/gripper_action_controller/gripper_cmd'
+# GRIPPER_ACTION_NAME = '/gripper_action_controller/gripper_cmd'
+GRIPPER_ACTION_NAME = '/robotiq_2f_urcap_adapter/robotiq_hande_urcap_adapter/gripper_command'
 
 
 class VisionClientNode(Node):
@@ -41,11 +43,12 @@ def main():
     vision_client_node = VisionClientNode()
     demo_node = rclpy.create_node(node_name="demo_node",
                                   use_global_arguments=False)
+    tf_broadcaster = StaticTransformBroadcaster(demo_node)
 
     logger = demo_node.get_logger()
 
     # --- 0) Move to home configuration and open gripper---
-    home_joints = [1.57, -1.57, 1.57, -1.57, -1.57, 0.0]
+    home_joints = [1.57, -1.9, 2.0, -1.9, -1.57, 0.0]
 
     logger.info("Moving to home configuration...")
     result = motion_client_node.move_to_joint(home_joints)
@@ -67,6 +70,18 @@ def main():
 
         # 1) Identify
         face_id, dice_pose, success = vision_client_node.dice_identification()
+        tf_msg = TransformStamped()
+        tf_msg.header = dice_pose.header
+        tf_msg.child_frame_id = "dice_tf"
+        tf_msg.transform.translation.x = dice_pose.pose.position.x
+        tf_msg.transform.translation.y = dice_pose.pose.position.y
+        tf_msg.transform.translation.z = dice_pose.pose.position.z
+        tf_msg.transform.rotation.x = dice_pose.pose.orientation.x
+        tf_msg.transform.rotation.y = dice_pose.pose.orientation.y
+        tf_msg.transform.rotation.z = dice_pose.pose.orientation.z
+        tf_msg.transform.rotation.w = dice_pose.pose.orientation.w
+        tf_broadcaster.sendTransform(tf_msg)
+
         if not success or face_id == 1:
             logger.error('Dice identification failed or finished')
             motion_client_node.destroy_node()
@@ -84,15 +99,15 @@ def main():
         pick_pose.header.stamp = demo_node.get_clock().now().to_msg()
         pick_pose.pose.position.x = 0.0
         pick_pose.pose.position.y = 0.0
-        pick_pose.pose.position.z = 0.1
-        pick_pose.pose.orientation.x = 1.0
+        pick_pose.pose.position.z = 0.01
+        pick_pose.pose.orientation.x = 0.0
         pick_pose.pose.orientation.y = 0.0
         pick_pose.pose.orientation.z = 0.0
-        pick_pose.pose.orientation.w = 0.0
+        pick_pose.pose.orientation.w = 1.0
 
         logger.info("Motion 2.1")
         result = motion_client_node.move_to_pose(pick_pose,
-                                                 cartesian_motion=False)
+                                                 cartesian_motion=True)
         if result.val != MoveItErrorCodes.SUCCESS:
             logger.error(f"Failed motion 2.1: {result.val}")
             motion_client_node.destroy_node()
