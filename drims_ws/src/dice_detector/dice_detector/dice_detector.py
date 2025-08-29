@@ -10,10 +10,11 @@ import cv2
 
 from drims2_msgs.srv import DiceIdentification
 from geometry_msgs.msg import PoseStamped
+from scipy.spatial.transform import Rotation
 
 
 def most_frequent(l: list[int]) -> int:
-    return max(set(l), key=l.count())
+    return max(set(l), key=l.count)
 
 
 class DiceDetector(Node):
@@ -42,9 +43,33 @@ class DiceDetector(Node):
         self.detected_face_id: Optional[int] = None
         self.detected_face_hist = list()
 
+        self.intrinsics = np.array([
+            [1.57855692e+03, 0.00000000e+00, 9.52440456e+02],
+            [0.00000000e+00, 1.58246225e+03, 5.45655012e+02],
+            [0.00000000e+00, 0.00000000e+00, 1.00000000e+00],
+        ],
+                                   dtype=np.float64)
+
+        # --- Distortion coefficients (k1, k2, p1, p2, k3)
+        self.dist_coeffs = np.array([
+            0.07206577, 0.08106335, 0.00300317, 0.00042163, -0.40383728
+        ],
+                                    dtype=np.float64)
+
+        self.extrinsics = np.array([
+            [0.998855, -0.019105, 0.043869, -0.236381],
+            [0.020615, 0.999201, -0.034238, -0.214228],
+            [-0.043180, 0.035103, 0.998450, 0.742136],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+                                   dtype=np.float64)
+
     def listener_callback(self, msg):
         # Convert ROS image -> OpenCV
         bgr_frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+
+        # Undistort
+        bgr_frame = cv2.undistort(bgr_frame, self.intrinsics, self.dist_coeffs)
 
         bgr_frame_cropped = self.crop_image_to_dice(bgr_frame)
         if bgr_frame_cropped is None:
@@ -89,6 +114,9 @@ class DiceDetector(Node):
         box = cv2.boxPoints(rect)
         box = np.int0(box)
 
+        self.dice_position = self.detect_dice_position(contours[0])
+        print(self.dice_position)
+
         # To draw identified dice bounding box
         # cv2.drawContours(bgr_frame, [box], 0, (0, 0, 255), 2)
 
@@ -127,6 +155,24 @@ class DiceDetector(Node):
             cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS
         )
         return len(keypoints), frame_with_features
+
+    def detect_dice_position(self, contour: NDArray) -> np.ndarray:
+        moments = cv2.moments(contour)
+        cx = int(moments['m10'] / moments['m00'])
+        cy = int(moments['m01'] / moments['m00'])
+
+        K = self.intrinsics
+        Kinv = np.linalg.inv(K)
+        H = self.extrinsics
+        Hinv = np.linalg.inv(H)
+
+        depth = (H @ np.array([0.0, 0.0, 0.0, 1.0]))[2]
+        depth *= 1000.0
+
+        norm_pose = Kinv @ np.array([cx, cy, 1])
+        pos_in_cf = np.hstack([norm_pose * depth * 0.001, 1])
+        pose = Hinv @ pos_in_cf
+        return pose[0:3] 
 
     def handle_service(self, request, response):
         # Here you put your detection values
