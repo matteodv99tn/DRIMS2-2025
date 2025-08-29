@@ -12,6 +12,10 @@ from drims2_msgs.srv import DiceIdentification
 from geometry_msgs.msg import PoseStamped
 
 
+def most_frequent(l: list[int]) -> int:
+    return max(set(l), key=l.count())
+
+
 class DiceDetector(Node):
 
     def __init__(self):
@@ -35,6 +39,9 @@ class DiceDetector(Node):
 
         self.get_logger().info("Dice Detector node started")
 
+        self.detected_face_id: Optional[int] = None
+        self.detected_face_hist = list()
+
     def listener_callback(self, msg):
         # Convert ROS image -> OpenCV
         bgr_frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
@@ -45,6 +52,17 @@ class DiceDetector(Node):
             return
 
         num_dots, dice_features = self.detect_dice_number(bgr_frame_cropped)
+        self.detected_face_hist.append(num_dots)
+
+        # Process face id every 10 images
+        if len(self.detected_face_hist) == 10:
+            face_id = most_frequent(self.detected_face_hist)
+            if self.detected_face_hist.count(face_id) > 7:
+                self.detected_face_id = face_id
+            else:
+                self.detected_face_id = None
+
+            self.detected_face_hist = list()
 
         out_frame = dice_features
 
@@ -110,14 +128,15 @@ class DiceDetector(Node):
         )
         return len(keypoints), frame_with_features
 
-    def detect_dice(self):
-        pass
-
     def handle_service(self, request, response):
         # Here you put your detection values
         pose = PoseStamped()
         pose.header.stamp = self.get_clock().now().to_msg()
         pose.header.frame_id = "checkerboard"
+
+        if self.detected_face_id is None:
+            response.success = False
+            return response
 
         pose.pose.position.x = 1.0
         pose.pose.position.y = 2.0
@@ -128,9 +147,10 @@ class DiceDetector(Node):
         pose.pose.orientation.z = 0.0
         pose.pose.orientation.w = 1.0
 
-        response.face_number = 7
         response.pose = pose
         response.success = True
+        response.face_number = self.detected_face_id
+        self.detected_face_id = None
 
         self.get_logger().info("Service called -> returning static dice info")
         return response
