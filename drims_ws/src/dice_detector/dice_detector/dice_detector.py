@@ -43,6 +43,7 @@ class DiceDetector(Node):
         self.detected_face_id: Optional[int] = None
         self.detected_face_hist = list()
 
+        # # Parameters of bags
         # self.intrinsics = np.array([
         #     [1.57855692e+03, 0.00000000e+00, 9.52440456e+02],
         #     [0.00000000e+00, 1.58246225e+03, 5.45655012e+02],
@@ -63,18 +64,26 @@ class DiceDetector(Node):
         #     [0.0, 0.0, 0.0, 1.0],
         # ],
         #                            dtype=np.float64)
-        self.intrinsics = np.array([[1.54588237e+03, 0.00000000e+00, 9.46934926e+02], [
-            0.00000000e+00, 1.55502898e+03, 5.44959477e+02
-        ], [0.00000000e+00, 0.00000000e+00, 1.00000000e+00]],
+
+        # Parameters
+
+        self.intrinsics = np.array([
+            [1.54588237e+03, 0.00000000e+00, 9.46934926e+02],
+            [0.00000000e+00, 1.55502898e+03, 5.44959477e+02],
+            [0.00000000e+00, 0.00000000e+00, 1.00000000e+00],
+        ],
                                    dtype=np.float64)
-        # --- Distortion coefficients (k1, k2, p1, p2, k3)
         self.dist_coeffs = np.array([
             0.13503889, -0.28098708, 0.0003601, -0.00038133, 0.13643112
         ],
                                     dtype=np.float64)
-        self.extrinsics = np.array([[0.999831, -0.015292, -0.010167, -0.062168], [
-            0.015271, 0.999881, -0.002154, -0.071062
-        ], [0.010198, 0.001998, 0.999946, 0.717149], [0.0, 0.0, 0.0, 1.0]],
+
+        self.extrinsics = np.array([
+            [0.999831, -0.015292, -0.010167, -0.062168],
+            [0.015271, 0.999881, -0.002154, -0.071062],
+            [0.010198, 0.001998, 0.999946, 0.717149],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
                                    dtype=np.float64)
 
     def listener_callback(self, msg):
@@ -127,6 +136,7 @@ class DiceDetector(Node):
         box = cv2.boxPoints(rect)
         box = np.int0(box)
 
+        self.dice_angle = rect[2]
         self.dice_position = self.detect_dice_position(contours[0])
         print(self.dice_position)
 
@@ -193,6 +203,21 @@ class DiceDetector(Node):
         pose.header.stamp = self.get_clock().now().to_msg()
         pose.header.frame_id = "checkerboard"
 
+        a = np.deg2rad(self.dice_angle)
+        Rz = np.array([
+            [np.cos(a), -np.sin(a), 0.0],
+            [np.sin(a), np.cos(a), 0.0],
+            [0.0, 0.0, 1.0],
+        ])
+        Rx = np.array([
+            [1.0, 0.0, 0.0],
+            [0.0, -1.0, 0.0],
+            [0.0, 0.0, -1.0],
+        ])
+
+        rot = Rz @ Rx
+        q = Rotation.from_matrix(rot).as_quat()
+
         if self.detected_face_id is None:
             response.success = False
             return response
@@ -201,10 +226,10 @@ class DiceDetector(Node):
         pose.pose.position.y = self.dice_position[1]
         pose.pose.position.z = self.dice_position[2]
 
-        pose.pose.orientation.x = 0.0
-        pose.pose.orientation.y = 0.0
-        pose.pose.orientation.z = 0.0
-        pose.pose.orientation.w = 1.0
+        pose.pose.orientation.x = q[0]
+        pose.pose.orientation.y = q[1]
+        pose.pose.orientation.z = q[2]
+        pose.pose.orientation.w = q[3]
 
         response.pose = pose
         response.success = True
